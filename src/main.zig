@@ -6,6 +6,7 @@ const Vector2 = rl.Vector2;
 
 const SIZE = Vector2.init(620 * 2, 480 * 2);
 const PADDING = 5.0;
+const SPEED_INCREMENT = 0.2;
 
 const Paddle = struct {
     position: Vector2,
@@ -42,8 +43,16 @@ pub fn main() !void {
     rl.initWindow(SIZE.x, SIZE.y, "zigout");
     defer rl.closeWindow(); // Close window and OpenGL context
 
+    rl.initAudioDevice();
+    defer rl.closeAudioDevice();
+
+    const paddleHitSound = rl.loadSound("resources/paddle_hit.wav");
+    defer rl.unloadSound(paddleHitSound);
+
+    const brickHitSound = rl.loadSound("resources/brick_hit.wav");
+    defer rl.unloadSound(brickHitSound);
+
     rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
-    //--------------------------------------------------------------------------------------
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -76,7 +85,7 @@ pub fn main() !void {
         // TODO: Update your variables here
         //----------------------------------------------------------------------------------
         updatePaddle(&paddle);
-        updateBall(&ball, paddle, bricks);
+        updateBall(&ball, paddle, bricks, paddleHitSound, brickHitSound);
 
         // Draw
         //----------------------------------------------------------------------------------
@@ -104,21 +113,28 @@ fn updatePaddle(paddle: *Paddle) void {
     paddle.position.x = math.clamp(paddle.position.x, 0, SIZE.x - paddle.size.x);
 }
 
-fn updateBall(ball: *Ball, paddle: Paddle, bricks: []Brick) void {
+fn updateBall(ball: *Ball, paddle: Paddle, bricks: []Brick, paddleSound: rl.Sound, brickSound: rl.Sound) void {
     ball.position = Vector2{
         .x = ball.position.x + ball.speed.x,
         .y = ball.position.y + ball.speed.y,
     };
 
     // Bounce off screen edges
-    if (ball.position.x < 0 or ball.position.x > SIZE.x) {
+    if (ball.position.x - ball.radius < 0) {
         ball.speed.x = -ball.speed.x;
+        ball.position.x = ball.radius;
+    } else if (ball.position.x + ball.radius > SIZE.x) {
+        ball.speed.x = -ball.speed.x;
+        ball.position.x = SIZE.x - ball.radius;
     }
 
-    if (ball.position.y < 0 or ball.position.y > SIZE.y) {
+    if (ball.position.y - ball.radius < 0) {
         ball.speed.y = -ball.speed.y;
+        ball.position.y = ball.radius;
+    } else if (ball.position.y + ball.radius > SIZE.y) {
+        ball.speed.y = -ball.speed.y;
+        ball.position.y = SIZE.y - ball.radius;
     }
-
     // Check collision with paddle
     if (isCollision(ball.*, paddle)) {
         ball.speed.y = -ball.speed.y;
@@ -127,19 +143,21 @@ fn updateBall(ball: *Ball, paddle: Paddle, bricks: []Brick) void {
         const paddleCenter = paddle.position.x + paddle.size.x / 2;
         const distanceFromCenter = ball.position.x - paddleCenter;
         ball.speed.x = distanceFromCenter * 0.1; // Can adjust this multiplier to fine tune
+
+        rl.playSound(paddleSound);
     }
 
     for (bricks) |*brick| {
         if (brick.isActive and isCollision(ball.*, brick)) {
             brick.isActive = false;
-            ball.speed.y = -ball.speed.y;
+            ball.speed.y = -ball.speed.y + SPEED_INCREMENT;
+            rl.playSound(brickSound);
             break; // only one collision per frame
         }
     }
 }
 
 // Create Bricks
-
 fn createBricks(allocator: *const std.mem.Allocator, rows: u32, cols: u32, brickSize: Vector2) ![]Brick {
     const bricks = try allocator.alloc(Brick, rows * cols);
     var prng = rand.DefaultPrng.init(42);
